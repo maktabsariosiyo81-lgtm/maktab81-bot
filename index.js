@@ -44,8 +44,21 @@ async function answerCallback(callbackId) {
     body: JSON.stringify({ callback_query_id: callbackId })
   });
 }
+async function deleteMessage(chatId, messageId) {
+  try {
+    await fetch(TG_API + "deleteMessage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, message_id: messageId })
+    });
+  } catch (e) { /* eski xabar o'chmasa ham muammo emas */ }
+}
 function btnRows(items) {
   return { inline_keyboard: items.map(i => [{ text: i[0], callback_data: i[1] }]) };
+}
+function replyKeyboard(items) {
+  // items: ["Matn1","Matn2",...] -> har biri alohida qatorda, doim pastda ko'rinadi
+  return { keyboard: items.map(i => [{ text: i }]), resize_keyboard: true, is_persistent: true };
 }
 
 // ---------------- HOLAT (STATE) — xotirada saqlanadi ----------------
@@ -56,19 +69,19 @@ function clearState(chatId) { stateMap.delete(chatId); }
 
 // ---------------- MENYULAR ----------------
 function showAdminMenu(chatId) {
-  return sendMessage(chatId, "👑 <b>Admin panel</b>", btnRows([
-    ["➕ O'qituvchi qo'shish", "admin_add"],
-    ["📋 Barcha o'qituvchilar", "admin_list"],
-    ["🔍 Filtr bo'yicha qidirish", "admin_filter"]
+  return sendMessage(chatId, "👑 <b>Admin panel</b>\nQuyidagi tugmalardan birini tanlang:", replyKeyboard([
+    "➕ O'qituvchi qo'shish",
+    "📋 Barcha o'qituvchilar",
+    "🔍 Filtr bo'yicha qidirish"
   ]));
 }
 function showTeacherMenu(chatId, fio) {
-  return sendMessage(chatId, "👋 Salom, <b>" + fio + "</b>!\nQaysi bo'limni to'ldirmoqchisiz?", btnRows([
-    ["1️⃣ Pasport va ish ma'lumotlari", "sec_1"],
-    ["2️⃣ Toifa", "sec_2"],
-    ["3️⃣ Malaka oshirish", "sec_3"],
-    ["4️⃣ Fan bo'yicha sertifikat", "sec_4"],
-    ["5️⃣ Diplom", "sec_5"]
+  return sendMessage(chatId, "👋 Salom, <b>" + fio + "</b>!\nQaysi bo'limni to'ldirmoqchisiz?", replyKeyboard([
+    "1️⃣ Pasport va ish ma'lumotlari",
+    "2️⃣ Toifa",
+    "3️⃣ Malaka oshirish",
+    "4️⃣ Fan bo'yicha sertifikat",
+    "5️⃣ Diplom"
   ]));
 }
 
@@ -107,6 +120,39 @@ async function handleMessage(msg) {
   }
 
   const state = getState(chatId);
+
+  if (text === "➕ O'qituvchi qo'shish") {
+    setState(chatId, { step: "admin_awaiting_fio" });
+    await sendMessage(chatId, "Yangi o'qituvchining F.I.Sh. ni to'liq kiriting:");
+    return;
+  }
+  if (text === "📋 Barcha o'qituvchilar") {
+    const list = await callApi("listTeachers", {});
+    if (!list.length) { await sendMessage(chatId, "Hozircha o'qituvchilar yo'q."); return; }
+    await sendMessage(chatId, "O'qituvchini tanlang:", btnRows(list.map(t => [t.fio, "profile_" + t.bazaRow])));
+    return;
+  }
+  if (text === "🔍 Filtr bo'yicha qidirish") {
+    await sendMessage(chatId, "Qaysi mezon bo'yicha qidiramiz?", btnRows([
+      ["Toifa", "filt_toifa"], ["Fan bo'yicha sertifikat", "filt_sert"],
+      ["Malaka oshirish", "filt_mok"], ["Diplom", "filt_diplom"]
+    ]));
+    return;
+  }
+  const sectionLabels = {
+    "1️⃣ Pasport va ish ma'lumotlari": "sec_1",
+    "2️⃣ Toifa": "sec_2",
+    "3️⃣ Malaka oshirish": "sec_3",
+    "4️⃣ Fan bo'yicha sertifikat": "sec_4",
+    "5️⃣ Diplom": "sec_5"
+  };
+  if (sectionLabels[text]) {
+    const link = await callApi("findByChatId", { chatId });
+    if (!link) { await sendMessage(chatId, "Avval kodingizni kiriting. /start"); return; }
+    startWizard(chatId, sectionLabels[text], link.bazaRow);
+    await askCurrentStep(chatId, getState(chatId));
+    return;
+  }
 
   if (state && state.step === "admin_awaiting_fio") {
     const r = await callApi("addTeacher", { fio: text });
@@ -147,6 +193,7 @@ async function handleCallback(cq) {
   const chatId = cq.message.chat.id;
   const data = cq.data;
   answerCallback(cq.id);
+  deleteMessage(chatId, cq.message.message_id); // tugma bosilgan xabarni o'chirib, chatni toza saqlaymiz
 
   if (data === "admin_add") {
     setState(chatId, { step: "admin_awaiting_fio" });
