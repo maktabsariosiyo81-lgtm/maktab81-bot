@@ -249,8 +249,16 @@ async function handleCallback(cq) {
     return;
   }
   if (data === "filt_fan") {
-    setState(chatId, { step: "admin_awaiting_fan_filter" });
-    await sendMessage(chatId, "Qaysi fan bo'yicha qidiraylik? Fan nomini yozing (masalan: Matematika):");
+    const subjects = await callApi("distinctValues", { colName: "FAN" });
+    if (!subjects.length) { await sendMessage(chatId, "Hozircha fan ma'lumoti kiritilmagan."); return; }
+    await sendMessage(chatId, "Fanni tanlang:", btnRows(subjects.map(s => [s, "fv_fan_" + s])));
+    return;
+  }
+  if (data.startsWith("fv_fan_")) {
+    const val = data.replace("fv_fan_", "");
+    const rows = await callApi("filterEq", { colName: "FAN", value: val, outCols: ["FIO","LAVOZIM"] });
+    const lines = rows.map(r => `${r.FIO} (${r.LAVOZIM||"-"})`);
+    await sendMessage(chatId, lines.length ? lines.join("\n") : "Natija topilmadi.");
     return;
   }
   if (data.startsWith("fv_toifa_")) {
